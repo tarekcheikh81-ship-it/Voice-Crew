@@ -36,7 +36,7 @@ jobs:
         agents/raphaella.md agents/jason.md agents/sara.md agents/freya.md
         agents/martina.md environment.yaml
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.4.0
 
       - name: Check that the key is set
         run: |
@@ -45,7 +45,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: stable
           cache: false
@@ -63,7 +63,7 @@ jobs:
 
       - name: Keep a copy of the IDs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: claude-lock
           path: kit/voice-crew-team/claude-lock.json
