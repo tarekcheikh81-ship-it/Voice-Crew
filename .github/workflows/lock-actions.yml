@@ -1,0 +1,47 @@
+name: Lock workflow actions
+
+# Pins every action used by this repository's workflows to an exact commit and
+# records it in .github/workflows/actions.lock (GitHub's workflow lockfile), so
+# a changed or hijacked action cannot run with this repository's secrets.
+#
+# Run it again after adding a workflow or changing any `uses:` line.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GitHub's lockfile tool
+        run: gh extension install github/gh-actions-lock
+
+      - name: Write the lockfile
+        run: gh actions-lock
+
+      - name: Show what changed
+        run: |
+          git add -A .github/workflows
+          git status --short
+          echo "-----BEGIN LOCK PATCH-----"
+          git diff --cached --binary | base64 -w 76
+          echo "-----END LOCK PATCH-----"
+
+      - name: Save the lockfile in the repository
+        run: |
+          if git diff --cached --quiet; then
+            echo "Lockfile already up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Lock workflow actions"
+          git push || echo "::warning::GitHub did not let this job save the lockfile. The patch printed in the step above has to be committed by someone allowed to change workflow files."
