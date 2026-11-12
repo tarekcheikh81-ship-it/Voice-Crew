@@ -1,0 +1,101 @@
+name: Publish teammates
+
+# Creates or updates the nine teammates and their sandbox on Claude Managed Agents,
+# then saves their IDs in kit/voice-crew-team/claude-lock.json so the next run
+# updates the same teammates instead of making duplicates.
+#
+# Needs one repository secret named ANTHROPIC_API_KEY
+# (repository Settings > Secrets and variables > Actions > New repository secret).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "kit/voice-crew-team/agents/**"
+      - "kit/voice-crew-team/environment.yaml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-teammates
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: kit/voice-crew-team
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      FILES: >-
+        agents/michael.md agents/mia.md agents/leo.md agents/jimmy.md
+        agents/raphaella.md agents/jason.md agents/sara.md agents/freya.md
+        agents/martina.md environment.yaml
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that the key is set
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::Add your Claude Console key as a repository secret named ANTHROPIC_API_KEY, then run this again."
+            exit 1
+          fi
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Install the ant tool
+        run: |
+          go install github.com/anthropics/anthropic-cli/v2/cmd/ant@v2.9.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Show the plan
+        run: ant apply --dry-run $FILES
+
+      - name: Publish
+        run: ant apply --yes $FILES
+
+      - name: Keep a copy of the IDs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-lock
+          path: kit/voice-crew-team/claude-lock.json
+          if-no-files-found: ignore
+
+      - name: Save the IDs in the repository
+        run: |
+          if [ ! -f claude-lock.json ]; then
+            echo "::error::Publishing did not write claude-lock.json."
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add claude-lock.json
+          if git diff --cached --quiet; then
+            echo "IDs unchanged."
+          else
+            git commit -m "Record teammate IDs"
+            git push || { git pull --rebase && git push; }
+          fi
+
+      - name: List the settings for the server
+        run: |
+          {
+            echo "### Settings to enter on the server"
+            echo
+            echo "These are IDs, not secrets."
+            echo
+            echo '```'
+            jq -r '.resources | to_entries[]
+              | (.key | split("/") | last | sub("\\.(md|yaml)$"; "") | ascii_upcase) as $n
+              | if $n == "ENVIRONMENT" then "ENVIRONMENT_ID=\(.value.id)" else "AGENT_ID_\($n)=\(.value.id)" end' \
+              claude-lock.json || cat claude-lock.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
