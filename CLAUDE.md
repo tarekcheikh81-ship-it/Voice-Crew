@@ -27,6 +27,10 @@ kit/voice-crew-team/
 vc/                             browser tests (Playwright) + three.min.js + a fake-Samsara test server
 .github/workflows/publish-teammates.yml   runs `ant apply` on GitHub with the ANTHROPIC_API_KEY repository secret,
                                 then commits kit/voice-crew-team/claude-lock.json (the teammates' IDs)
+.github/workflows/lock-actions.yml        runs GitHub's `gh actions-lock` and prints the result as a patch
+.github/workflows/actions.lock            GENERATED workflow lockfile: never edit by hand. After changing any
+                                `uses:` line or adding a workflow, run "Lock workflow actions" and commit its
+                                patch (a job cannot push to .github/workflows itself)
 ```
 
 ## Commands
