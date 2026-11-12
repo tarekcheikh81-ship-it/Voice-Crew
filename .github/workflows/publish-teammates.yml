@@ -38,12 +38,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4.4.0
 
-      - name: Check that the key is set
+      # Never prints the key. Spaces and line breaks picked up while pasting are ignored.
+      - name: Check the key
         run: |
-          if [ -z "$ANTHROPIC_API_KEY" ]; then
+          clean="$(printf '%s' "$ANTHROPIC_API_KEY" | tr -d '[:space:]')"
+          if [ -z "$clean" ]; then
             echo "::error::Add your Claude Console key as a repository secret named ANTHROPIC_API_KEY, then run this again."
             exit 1
           fi
+          echo "::add-mask::$clean"
+          if [ "$clean" != "$ANTHROPIC_API_KEY" ]; then
+            echo "::notice::The saved key has spaces or line breaks in it. They are ignored."
+          fi
+          case "$clean" in
+            sk-ant-*) ;;
+            *)
+              echo "::error::The saved secret does not look like a Claude Console key (those start with sk-ant-). Copy the key again from the Claude Console and update the ANTHROPIC_API_KEY secret."
+              exit 1 ;;
+          esac
+          if printf '%s' "$clean" | LC_ALL=C grep -q '[^A-Za-z0-9_-]'; then
+            echo "::error::The saved key contains characters a Claude Console key never has. Copy the key again from the Claude Console and update the ANTHROPIC_API_KEY secret."
+            exit 1
+          fi
+          code="$(curl -sS -o /dev/null -w '%{http_code}' 'https://api.anthropic.com/v1/models?limit=1' \
+            -H 'anthropic-version: 2023-06-01' -H @<(printf 'x-api-key: %s' "$clean") || true)"
+          case "$code" in
+            200) echo "The key works." ;;
+            401|403)
+              echo "::error::Claude did not accept the saved key (answer $code). It may be incomplete, mistyped or deleted. Create a new key in the Claude Console and update the ANTHROPIC_API_KEY secret."
+              exit 1 ;;
+            *)
+              echo "::error::Could not check the key: Claude's service answered $code. Run this again in a few minutes."
+              exit 1 ;;
+          esac
 
       - uses: actions/setup-go@v5.6.0
         with:
@@ -56,10 +83,14 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Show the plan
-        run: ant apply --dry-run $FILES
+        run: |
+          export ANTHROPIC_API_KEY="$(printf '%s' "$ANTHROPIC_API_KEY" | tr -d '[:space:]')"
+          ant apply --dry-run $FILES
 
       - name: Publish
-        run: ant apply --yes $FILES
+        run: |
+          export ANTHROPIC_API_KEY="$(printf '%s' "$ANTHROPIC_API_KEY" | tr -d '[:space:]')"
+          ant apply --yes $FILES
 
       - name: Keep a copy of the IDs
         if: always()
