@@ -30,7 +30,6 @@ jobs:
       run:
         working-directory: kit/voice-crew-team
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       FILES: >-
         agents/michael.md agents/mia.md agents/leo.md agents/jimmy.md
         agents/raphaella.md agents/jason.md agents/sara.md agents/freya.md
@@ -38,39 +37,69 @@ jobs:
     steps:
       - uses: actions/checkout@v4.4.0
 
-      # Never prints the key. Spaces and line breaks picked up while pasting are ignored.
+      # Finds the Claude key inside whatever was pasted into the secret, checks that
+      # Claude accepts it, and hands it to the later steps. It never prints any part
+      # of the secret: only its size and what kind of thing it looks like.
       - name: Check the key
+        env:
+          SAVED_SECRET: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          clean="$(printf '%s' "$ANTHROPIC_API_KEY" | tr -d '[:space:]')"
-          if [ -z "$clean" ]; then
+          raw="$SAVED_SECRET"
+          packed="$(printf '%s' "$raw" | tr -d '[:space:]')"
+          if [ -z "$packed" ]; then
             echo "::error::Add your Claude Console key as a repository secret named ANTHROPIC_API_KEY, then run this again."
             exit 1
           fi
-          echo "::add-mask::$clean"
-          if [ "$clean" != "$ANTHROPIC_API_KEY" ]; then
-            echo "::notice::The saved key has spaces or line breaks in it. They are ignored."
-          fi
-          case "$clean" in
-            sk-ant-*) ;;
-            *)
-              echo "::error::The saved secret does not look like a Claude Console key (those start with sk-ant-). Copy the key again from the Claude Console and update the ANTHROPIC_API_KEY secret."
-              exit 1 ;;
-          esac
-          if printf '%s' "$clean" | LC_ALL=C grep -q '[^A-Za-z0-9_-]'; then
-            echo "::error::The saved key contains characters a Claude Console key never has. Copy the key again from the Claude Console and update the ANTHROPIC_API_KEY secret."
+
+          # A Claude key is the part that starts with sk-ant-. Look for it with line
+          # breaks closed up (a key wrapped over two lines), then exactly as pasted
+          # (a key with other text after it).
+          first="$(printf '%s' "$packed" | LC_ALL=C grep -o 'sk-ant-[A-Za-z0-9_-]*' | head -n 1 || true)"
+          second="$(printf '%s' "$raw" | LC_ALL=C grep -o 'sk-ant-[A-Za-z0-9_-]*' | head -n 1 || true)"
+
+          if [ -z "$first" ]; then
+            lines="$(printf '%s\n' "$raw" | grep -c '[^[:space:]]' || true)"
+            case "$packed" in
+              samsara_api_*) kind="a Samsara token" ;;
+              sk-*) kind="a key from another AI service (it starts with sk- but not sk-ant-)" ;;
+              ghp_*|gho_*|github_pat_*) kind="a GitHub token" ;;
+              AIza*) kind="a Google key" ;;
+              http*) kind="a web address" ;;
+              ANTHROPIC*|anthropic*|Anthropic*) kind="the name ANTHROPIC_API_KEY typed where the key itself should go" ;;
+              *@*) kind="an email address" ;;
+              *) kind="something that is not a key from any service this job recognises" ;;
+            esac
+            echo "::error::The saved secret has no Claude Console key in it (those start with sk-ant-). It holds ${#packed} characters on $lines line(s) and looks like $kind. In the Claude Console create a key, copy it with the copy button, and put only that in the ANTHROPIC_API_KEY secret."
             exit 1
           fi
-          code="$(curl -sS -o /dev/null -w '%{http_code}' 'https://api.anthropic.com/v1/models?limit=1' \
-            -H 'anthropic-version: 2023-06-01' -H @<(printf 'x-api-key: %s' "$clean") || true)"
+
+          ask() {
+            curl -sS -o /dev/null -w '%{http_code}' 'https://api.anthropic.com/v1/models?limit=1' \
+              -H 'anthropic-version: 2023-06-01' -H @<(printf 'x-api-key: %s' "$1") || true
+          }
+          key="$first"
+          echo "::add-mask::$key"
+          code="$(ask "$key")"
+          if [ "$code" != "200" ] && [ -n "$second" ] && [ "$second" != "$first" ]; then
+            echo "::add-mask::$second"
+            code2="$(ask "$second")"
+            if [ "$code2" = "200" ]; then key="$second"; code="$code2"; fi
+          fi
           case "$code" in
-            200) echo "The key works." ;;
+            200) ;;
             401|403)
-              echo "::error::Claude did not accept the saved key (answer $code). It may be incomplete, mistyped or deleted. Create a new key in the Claude Console and update the ANTHROPIC_API_KEY secret."
+              echo "::error::Claude did not accept the saved key (answer $code). The key found is ${#key} characters long. It may be cut short, mistyped or deleted. Create a new key in the Claude Console and update the ANTHROPIC_API_KEY secret."
               exit 1 ;;
             *)
               echo "::error::Could not check the key: Claude's service answered $code. Run this again in a few minutes."
               exit 1 ;;
           esac
+          if [ "$key" != "$raw" ]; then
+            echo "::notice::The saved secret has extra spaces, line breaks or text around the key. They are ignored."
+          fi
+          umask 077
+          printf '%s' "$key" > "$RUNNER_TEMP/claude-key"
+          echo "The key works."
 
       - uses: actions/setup-go@v5.6.0
         with:
@@ -84,13 +113,17 @@ jobs:
 
       - name: Show the plan
         run: |
-          export ANTHROPIC_API_KEY="$(printf '%s' "$ANTHROPIC_API_KEY" | tr -d '[:space:]')"
+          export ANTHROPIC_API_KEY="$(cat "$RUNNER_TEMP/claude-key")"
           ant apply --dry-run $FILES
 
       - name: Publish
         run: |
-          export ANTHROPIC_API_KEY="$(printf '%s' "$ANTHROPIC_API_KEY" | tr -d '[:space:]')"
+          export ANTHROPIC_API_KEY="$(cat "$RUNNER_TEMP/claude-key")"
           ant apply --yes $FILES
+
+      - name: Forget the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/claude-key"
 
       - name: Keep a copy of the IDs
         if: always()
