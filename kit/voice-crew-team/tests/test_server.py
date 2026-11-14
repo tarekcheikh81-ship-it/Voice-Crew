@@ -472,3 +472,15 @@ def test_the_team_runs_mostly_on_the_small_model():
     big = sorted(k for k in crew.TEAM if "claude-sonnet-5-5" in re.split(r"^---\s*$", (agents / (k + ".md")).read_text(encoding="utf8"), flags=re.M)[1])
     small = sorted(k for k in crew.TEAM if "claude-haiku-5-5" in re.split(r"^---\s*$", (agents / (k + ".md")).read_text(encoding="utf8"), flags=re.M)[1])
     assert big == ["jimmy", "mia"] and len(small) == 7 and "michael" in small
+
+
+def test_each_teammate_knows_the_crews_name_for_its_model_and_never_names_the_vendor():
+    agents = Path(__file__).resolve().parent.parent / "agents"
+    for k in crew.TEAM:
+        head, body = (agents / (k + ".md")).read_text(encoding="utf8").split("\n---\n", 1)
+        name = "Hawk 5.6" if "claude-sonnet-5-5" in head else "Falcon 4.7"
+        assert "say " + name + "," in body, k
+        assert "never name the company or the product behind it" in body, k
+        assert "sincerely asks whether you are an AI, say yes" in body, k
+        for word in ("Claude", "Anthropic", "Haiku", "Sonnet", "Opus"):
+            assert word not in body, (k, word)        # the instructions themselves never mention the vendor

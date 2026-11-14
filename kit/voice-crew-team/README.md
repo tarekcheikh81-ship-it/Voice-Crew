@@ -150,7 +150,7 @@ The **Teach** button (and "Teach Jimmy: when I ask for a truck report, start wit
 ## Costs and safety
 
 - You pay normal token rates plus $0.08 per session-hour of active running time. Calls are short, but watch usage in the Console during the first days.
-- **Built to be cheap.** Seven teammates (Michael, Leo, Raphaella, Jason, Sara, Freya and Martina) run on the small Haiku model, which costs about a twentieth of Sonnet. Only Mia and Jimmy, who do the deep design and the server code, run on Sonnet, at medium effort. The agent service caches each teammate's instructions and earlier turns by itself, so repeated text is billed at a fraction of the price; there is nothing to switch on.
+- **Built to be cheap.** Seven teammates (Michael, Leo, Raphaella, Jason, Sara, Freya and Martina) run on Falcon 4.7, the small model, which costs about a twentieth of Hawk 5.6. Only Mia and Jimmy, who do the deep design and the server code, run on Hawk 5.6, at medium effort. See "Model names" below. The agent service caches each teammate's instructions and earlier turns by itself, so repeated text is billed at a fraction of the price; there is nothing to switch on.
 - **One request can never fan out.** Michael brings in at most two teammates, a handoff is only a note on the screen (it does not start another teammate by itself), and Michael wraps up once: at most four answers per request, unless you call more teammates by name yourself. Answers are held to a few sentences by their instructions.
 - **A hard cap per conversation.** `SESSION_BUDGET_CENTS` (100, so $1.00) is the most one teammate's conversation may spend. The agent service enforces it: at the cap the teammate stops, the record says so, and your next request starts a fresh conversation. Set it to 0 for no cap. `/api/health` shows `spend_cap`; if it says `refused`, the service would not take a cap and the team is running without one.
 - Also set a monthly spending limit in the Claude Console. That is the only limit that covers everything.
@@ -159,9 +159,21 @@ The **Teach** button (and "Teach Jimmy: when I ask for a truck report, start wit
 - The sandbox starts with limited network access (package managers only). Read what the teammates write before you run or ship it. Sessions stay until you delete them in the Console.
 - Managed Agents is a public beta, so details can change. It is not covered by zero data retention or a HIPAA agreement.
 
+## Model names
+
+The crew has its own names for the models. The teammates use these names, never name the company or product behind them, and say yes if someone sincerely asks whether they are an AI.
+
+| Crew name | Used for | Who runs on it | Real model ID in the agent file |
+| --- | --- | --- | --- |
+| Falcon 4.7 | Routing, everyday answers, notes, sheets | Michael, Leo, Raphaella, Jason, Sara, Freya, Martina | `claude-haiku-5-5` |
+| Hawk 5.6 | Deep design and server code | Mia, Jimmy | `claude-sonnet-5-5` |
+| Eagle Eye | The hardest, deepest work | Nobody yet | `claude-opus-5-5` |
+
+The names are labels only. The `model:` line in each agent file must keep the real model ID, because the agent service accepts nothing else, and your bill and the Console show the real names. Eagle Eye costs about twice Hawk 5.6; to put a teammate on it, set that teammate's `model:` to `claude-opus-5-5` and its sentence to "Eagle Eye".
+
 ## Changing things
 
-- **A teammate's model or instructions:** edit `agents/<name>.md`, then run `./scripts/apply.sh` again (or the Publish teammates job on GitHub). To give a teammate the larger model, replace its `model: claude-haiku-5-5` line with the three `model:` lines from `agents/mia.md`.
+- **A teammate's model or instructions:** edit `agents/<name>.md`, then run `./scripts/apply.sh` again (or the Publish teammates job on GitHub). To move a teammate up to Hawk 5.6, replace its `model:` line with the three `model:` lines from `agents/mia.md`, and change the name in its "which model you run on" sentence to match.
 - **Let them search the web:** in the agent files, change `enabled: false` to `true` for `web_search` and `web_fetch`.
 - **Working on one codebase:** each session has its own sandbox, so teammates do not share files. Either give them a shared git repository (this needs the environment's network settings to allow your git host; see the Managed Agents environment docs), or use the multi-agent feature, which is a research preview that must be requested.
 - **A newer version of the screen:** save the page's HTML and run `python scripts/make_index.py voice-crew.html server/public/index.html`.

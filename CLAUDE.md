@@ -23,7 +23,7 @@ kit/voice-crew-team/
   server/public/index.html      GENERATED from voice-crew.html (see below)
   server/public/shim.js         window.claude provider, window.crewApi, crewNeeds hook
   scripts/                      apply.sh, make_index.py, run_task.py, samsara_check.py
-  tests/                        pytest, 84 tests
+  tests/                        pytest, 85 tests
 vc/                             browser tests (Playwright) + three.min.js + a fake-Samsara test server
 .github/workflows/publish-teammates.yml   runs `ant apply` on GitHub with the ANTHROPIC_API_KEY repository secret,
                                 then commits kit/voice-crew-team/claude-lock.json (the teammates' IDs)
@@ -34,7 +34,7 @@ vc/                             browser tests (Playwright) + three.min.js + a fa
 ```
 
 ## Commands
-- Server tests: `cd kit/voice-crew-team && pip install -r server/requirements.txt pytest httpx && python -m pytest -q tests` (expect 84 passed).
+- Server tests: `cd kit/voice-crew-team && pip install -r server/requirements.txt pytest httpx && python -m pytest -q tests` (expect 85 passed).
 - After any change to `voice-crew.html`, regenerate the hosted copy: `cd kit/voice-crew-team && python scripts/make_index.py ../../voice-crew.html server/public/index.html`. That script swaps one sentence in the page's LIMITS text ("In this chat you cannot run code, open files, or deploy anything. If that matters, say so in a sentence and offer a plan or code to copy instead.") for the hosted sandbox wording, and stops with an error if that sentence is missing, so keep it in LIMITS.
 - Page tests (need Node and `npm i playwright`, then Chromium): `node vc/w3c.js` (access, record, report, charter), `w3t.js` (Teach), `w3g.js`, `w3h.js`, `w3q.js`, `w3w.js`, `w3z.js`, `t_end.js`. They print PASS/FAIL and `ALL PASS`. They open the page with a stubbed `window.claude` and a software WebGL renderer, so they take a minute each.
 - Hosted end-to-end: `python vc/e2e_samsara_server.py` (port 8014, fake Samsara, stand-in agent), then `node vc/w3s.js`. `w3x.js` needs the mock server on 8013: `MOCK=1 python -m uvicorn app:app --port 8013` from `kit/voice-crew-team/server`.
@@ -54,6 +54,7 @@ vc/                             browser tests (Playwright) + three.min.js + a fa
 
 ## Cost controls (added on the owner's request)
 - Models: seven teammates on `claude-haiku-5-5`; Mia and Jimmy on `claude-sonnet-5-5` at medium effort. A test pins this split, so change the test with it.
+- The owner's names for the models: Falcon 4.7 = `claude-haiku-5-5`, Hawk 5.6 = `claude-sonnet-5-5`, Eagle Eye = `claude-opus-5-5` (nobody assigned). Use his names when talking to him and in the owner's guide. They are labels only: `model:` in `agents/*.md` must stay the real ID. Each agent file tells the teammate its crew model name, never to name the vendor, and to say yes when sincerely asked whether it is an AI; keep that last part.
 - Prompt caching and context compaction are done by the Managed Agents service itself; there is no switch for them in this kit.
 - History: the page sends the last 10 lines plus its notes; the server starts a fresh session after `SESSION_MAX_USES` (5) requests.
 - Fan-out: the page caps the lead's picks at 2, handoffs are display-only, so one lead-routed request is at most 4 model answers (teammates the owner calls by name are not capped).
