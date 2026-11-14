@@ -17,3 +17,5 @@ node_modules/
 vc/test-page.html
 vc/x-desk.png
 kit/voice-crew-team/server/state.json
+vc/q-*.png
+vc/report-*.png

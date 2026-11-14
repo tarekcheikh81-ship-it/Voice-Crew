@@ -2309,7 +2309,7 @@ function leadPrompt(ctx,text){
   '- Only on-duty people are picked. When someone is off duty, the teammate marked as covering them takes that work: pick the covering teammate and set "covering" to the absent person’s role.\n'+
   '- Freya is the owner’s personal assistant, not a builder: pick her for personal and client-facing requests such as keeping notes, planning the day, drafting messages and replies, or preparing an answer for one of the owner’s clients. Never pick her for software work.\n'+
   '- Martina does the spreadsheets and data: pick her for data entry, building or editing a sheet, cleaning or reshaping data, formulas, tables and sheet design. Never pick her for software work, and pick Freya, not Martina, for notes and messages.\n'+
-  '- Pick 0 to 3 people whose expertise the request genuinely needs. Fewer, sharper opinions beat a crowd. Give each pick a concrete "ask": the exact question they should work out. Make the asks fit together so the picks complement each other instead of repeating each other.\n'+
+  '- Pick 0 to 2 people whose expertise the request genuinely needs. Fewer, sharper opinions beat a crowd. Give each pick a concrete "ask": the exact question they should work out. Make the asks fit together so the picks complement each other instead of repeating each other.\n'+
   '- If you can handle it yourself (greetings, small talk, simple questions), or the work needs an absent person nobody can cover, answer in "intro" and pick nobody. Say plainly when nobody can cover.\n'+
   '- Otherwise "intro" is what you say first, out loud: one or two short sentences, at most 30 words, naming who you are bringing in and why. When you answer yourself, "intro" is your whole answer, at most 60 words.\n'+
   '- When a "Live Samsara data" block is in this request, the numbers are already in front of you: answer from it yourself and bring nobody in. Say the headline out loud and put the full list in "details" (shown on screen only, at most 150 words). Never add a number that is not in the block.\n'+
@@ -2348,7 +2348,7 @@ function normalizePlan(d){
   if(!d||typeof d.intro!=='string'||!d.intro.trim())throw {code:'invalid_json'};
   var seen={},picks=[];
   (Array.isArray(d.picks)?d.picks:[]).forEach(function(p){
-    if(!p||picks.length>=3)return;
+    if(!p||picks.length>=2)return;
     var r=roleFrom(p.role);if(!r)return;
     var cover=null;
     if(!isOn(r)){var c=coverOf(r);if(!c)return;cover=r;r=c;}
@@ -2401,7 +2401,7 @@ async function send(preset){
     text=(preset!=null?preset:input.value).trim();
     if(!text)return;
     clearTimeout(heardT);if(call)call.last=Date.now();
-    var ctx=history.slice(-14).join('\n');
+    var ctx=history.slice(-10).join('\n');
     userRow=addUser(text);history.push('Owner: '+text);
     input.value='';settled='';partial='';grow();
     workReset();teachFresh=null;teachFromChat(text);reportOn=REPORT_RX.test(text)?1:null;

@@ -75,7 +75,9 @@ TOOL_LABELS = {"bash": "Running a command", "write": "Writing a file", "edit": "
 STATE_FILE = Path(os.environ.get("STATE_FILE", HERE / "state.json"))
 ACTIVITY_FILE = Path(os.environ.get("ACTIVITY_FILE", STATE_FILE.parent / "activity.jsonl"))
 GRANTS_FILE = Path(os.environ.get("GRANTS_FILE", STATE_FILE.parent / "grants.json"))
-SESSION_MAX_USES = int(os.environ.get("SESSION_MAX_USES", "10"))
+SESSION_MAX_USES = int(os.environ.get("SESSION_MAX_USES", "5"))
+# hard spending cap for one teammate conversation, in US cents (0 = no cap); the agent service enforces it
+SESSION_BUDGET_CENTS = int(os.environ.get("SESSION_BUDGET_CENTS", "100"))
 ASK_TIMEOUT = float(os.environ.get("ASK_TIMEOUT", "180"))
 MAX_REQUESTS_PER_MIN = int(os.environ.get("MAX_REQUESTS_PER_MIN", "40"))
 
@@ -266,6 +268,10 @@ class MockBackend:
         return json.dumps({"wrap": "That is the plan for now. Connect the real agents to go further."})
 
 
+class BudgetReached(RuntimeError):
+    """The teammate's conversation hit its spending cap and the agent service paused it."""
+
+
 class ManagedBackend:
     """One long-lived session per teammate, on Claude Managed Agents."""
 
@@ -281,6 +287,7 @@ class ManagedBackend:
         self.locks = {k: threading.Lock() for k in TEAM}
         self.state_lock = threading.Lock()
         self._used = {}
+        self.cap_refused = False   # set when the service or an old library would not take a spending cap
         self.state = {"sessions": {}}
         try:
             self.state = json.loads(STATE_FILE.read_text(encoding="utf8"))
@@ -304,10 +311,27 @@ class ManagedBackend:
         except Exception:
             pass
 
+    def spend_cap(self):
+        """What /api/health reports: the cap in cents, "off", or "refused" when it could not be applied."""
+        if SESSION_BUDGET_CENTS <= 0:
+            return "off"
+        return "refused" if self.cap_refused else SESSION_BUDGET_CENTS
+
     def _new_session(self, key):
-        s = self.client.beta.sessions.create(
-            agent=self.agent_id(key), environment_id=self.env_id, title="Voice Crew: " + TEAM[key]
-        )
+        kw = dict(agent=self.agent_id(key), environment_id=self.env_id, title="Voice Crew: " + TEAM[key])
+        if SESSION_BUDGET_CENTS > 0 and not self.cap_refused:
+            kw["budget"] = {"type": "limit", "max_list_cost": {"amount": str(SESSION_BUDGET_CENTS), "currency": "USD"}}
+        try:
+            s = self.client.beta.sessions.create(**kw)
+        except Exception as e:
+            # an older library (TypeError) or a service that will not take a cap (400): the team keeps working
+            # without one, and /api/health says so, rather than every request failing
+            if "budget" not in kw or not (isinstance(e, TypeError) or getattr(e, "status_code", None) == 400):
+                raise
+            kw.pop("budget")
+            s = self.client.beta.sessions.create(**kw)
+            self.cap_refused = True
+            print("spending cap not applied: %s" % str(e)[:200], flush=True)
         self.state["sessions"][key] = {"id": s.id, "uses": 0}
         self._save()
         return self.state["sessions"][key]
@@ -342,6 +366,9 @@ class ManagedBackend:
                     progress.update(key, tool=getattr(event, "name", "") or "a tool")
                     self._used.setdefault(key, []).append(tool_summary(event))
                 elif t == "session.status_idle":
+                    why = getattr(event, "stop_reason", None)
+                    if getattr(why, "type", why) == "budget_reached":
+                        raise BudgetReached("reached the spending cap for this conversation")
                     break
                 elif t == "error" or t.endswith(".error") or t in ("session.status_terminated", "session.budget_reached"):
                     raise RuntimeError("agent stopped (%s)" % t)
@@ -361,8 +388,10 @@ class ManagedBackend:
             s = self._session(key)
             try:
                 text = self._run(s["id"], prompt, key)
-            except TimeoutError:
-                self.state["sessions"].pop(key, None)   # do not reuse a session that may still be busy
+            except (TimeoutError, BudgetReached):
+                # do not reuse a session that may still be busy, or one paused at its cap; and never retry a
+                # capped request by itself, or a runaway job would simply spend a second cap
+                self.state["sessions"].pop(key, None)
                 self._save()
                 raise
             except Exception:
@@ -428,7 +457,7 @@ def health():
     try:
         b = get_backend()
         return {"ok": True, "mode": b.mode, "agents": b.configured(), "locked": bool(os.environ.get("CREW_KEY")),
-                "samsara": get_fleet().configured()}
+                "samsara": get_fleet().configured(), "spend_cap": b.spend_cap() if hasattr(b, "spend_cap") else "off"}
     except Exception as e:  # missing key, missing package...
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -465,6 +494,10 @@ def sample(body: SampleIn, request: Request):
         progress.finish(key, False)
         ledger.add("worked", key, "Did not finish: took too long", ask=brief, tools=popped_tools(b, key), secs=round(time.time() - started), ok=False)
         return JSONResponse({"error": "timeout"}, status_code=504)
+    except BudgetReached:
+        progress.finish(key, False)
+        ledger.add("worked", key, "Stopped: reached the spending cap for one conversation", ask=brief, tools=popped_tools(b, key), secs=round(time.time() - started), ok=False)
+        return JSONResponse({"error": "budget", "detail": "spending cap reached"}, status_code=502)
     except Exception as e:
         progress.finish(key, False)
         print("ask failed for %s: %s" % (key, e), flush=True)

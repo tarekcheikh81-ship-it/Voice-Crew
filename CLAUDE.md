@@ -23,7 +23,7 @@ kit/voice-crew-team/
   server/public/index.html      GENERATED from voice-crew.html (see below)
   server/public/shim.js         window.claude provider, window.crewApi, crewNeeds hook
   scripts/                      apply.sh, make_index.py, run_task.py, samsara_check.py
-  tests/                        pytest, 74 tests
+  tests/                        pytest, 84 tests
 vc/                             browser tests (Playwright) + three.min.js + a fake-Samsara test server
 .github/workflows/publish-teammates.yml   runs `ant apply` on GitHub with the ANTHROPIC_API_KEY repository secret,
                                 then commits kit/voice-crew-team/claude-lock.json (the teammates' IDs)
@@ -34,7 +34,7 @@ vc/                             browser tests (Playwright) + three.min.js + a fa
 ```
 
 ## Commands
-- Server tests: `cd kit/voice-crew-team && pip install -r server/requirements.txt pytest httpx && python -m pytest -q tests` (expect 74 passed).
+- Server tests: `cd kit/voice-crew-team && pip install -r server/requirements.txt pytest httpx && python -m pytest -q tests` (expect 84 passed).
 - After any change to `voice-crew.html`, regenerate the hosted copy: `cd kit/voice-crew-team && python scripts/make_index.py ../../voice-crew.html server/public/index.html`. That script swaps one sentence in the page's LIMITS text ("In this chat you cannot run code, open files, or deploy anything. If that matters, say so in a sentence and offer a plan or code to copy instead.") for the hosted sandbox wording, and stops with an error if that sentence is missing, so keep it in LIMITS.
 - Page tests (need Node and `npm i playwright`, then Chromium): `node vc/w3c.js` (access, record, report, charter), `w3t.js` (Teach), `w3g.js`, `w3h.js`, `w3q.js`, `w3w.js`, `w3z.js`, `t_end.js`. They print PASS/FAIL and `ALL PASS`. They open the page with a stubbed `window.claude` and a software WebGL renderer, so they take a minute each.
 - Hosted end-to-end: `python vc/e2e_samsara_server.py` (port 8014, fake Samsara, stand-in agent), then `node vc/w3s.js`. `w3x.js` needs the mock server on 8013: `MOCK=1 python -m uvicorn app:app --port 8013` from `kit/voice-crew-team/server`.
@@ -52,9 +52,17 @@ vc/                             browser tests (Playwright) + three.min.js + a fa
 - Teach: the owner teaches a teammate or everyone ("Teach Jimmy: ..."); lessons are stored on the device and added to prompts.
 - Obedience, access, record, report (latest work): teammates do what the owner asks inside the access he grants; Samsara lookups run only after "grant Samsara access" (or the button), auto-resume the waiting request, and "revoke" stops it; the server keeps a ledger of what actually happened; the Report button and "report to me" show recorded lines (from the server) and "their words" (the teammates' own `did` lists) separately; the charter (obey, never illegal, report honestly) is in the page's LIMITS and in all nine `agents/*.md`.
 
+## Cost controls (added on the owner's request)
+- Models: seven teammates on `claude-haiku-5-5`; Mia and Jimmy on `claude-sonnet-5-5` at medium effort. A test pins this split, so change the test with it.
+- Prompt caching and context compaction are done by the Managed Agents service itself; there is no switch for them in this kit.
+- History: the page sends the last 10 lines plus its notes; the server starts a fresh session after `SESSION_MAX_USES` (5) requests.
+- Fan-out: the page caps the lead's picks at 2, handoffs are display-only, so one lead-routed request is at most 4 model answers (teammates the owner calls by name are not capped).
+- `SESSION_BUDGET_CENTS` (100) is a hard per-session cap enforced by the service; the server drops a capped session and never retries it by itself.
+- There is no per-answer token limit in Managed Agents: answer length is held by the word limits in the prompts.
+
 ## NOT tested (say so plainly when asked)
 - A real Samsara account (needs the owner's tokens; he should run `scripts/samsara_check.py` once).
-- The live Managed Agents service, and whether its tool-use events carry the tool input (`tool_summary` falls back to the tool name only).
+- The live Managed Agents service, and whether its tool-use events carry the tool input (`tool_summary` falls back to the tool name only). That includes the session budget and how well Haiku follows the lead's JSON plan format and the charter.
 - A real phone. iPhone Safari cannot speak while the page is in the background; no browser keeps the microphone open in the background.
 - Whether each AI teammate follows every rule in every case. They are Claude models: they follow instructions and refuse clearly illegal requests, but can misjudge or word a report wrongly. That is why the server keeps its own record, and why only server-mediated things (Samsara) can really be switched on and off.
 

@@ -375,3 +375,100 @@ def test_what_was_asked_and_the_kind_of_step():
     assert crew.step_of('x "picks": [') == "decided who takes it"
     assert crew.step_of('Reply with only one JSON object: {"wrap": string}') == "wrapped it up"
     assert crew.step_of("You are Mia ... {\"says\": string}") == "answered"
+
+
+# ---------------------------------------------------------------- spending cap
+CAP = {"type": "limit", "max_list_cost": {"amount": "100", "currency": "USD"}}
+
+
+def test_every_new_conversation_carries_the_spending_cap(managed):
+    c, b, calls = managed
+    assert c.post("/api/sample", json={"prompt": "You are Mia, x"}, headers={"x-crew-key": "secret"}).status_code == 200
+    assert [x for x in calls if x[0] == "create"][0][1]["budget"] == CAP
+    assert c.get("/api/health").json()["spend_cap"] == 100
+
+
+def test_the_cap_can_be_changed_or_switched_off(managed, monkeypatch):
+    c, b, calls = managed
+    h = {"x-crew-key": "secret"}
+    monkeypatch.setattr(crew, "SESSION_BUDGET_CENTS", 250)
+    c.post("/api/sample", json={"prompt": "You are Mia, x"}, headers=h)
+    monkeypatch.setattr(crew, "SESSION_BUDGET_CENTS", 0)
+    c.post("/api/sample", json={"prompt": "You are Leo, x"}, headers=h)
+    creates = [x[1] for x in calls if x[0] == "create"]
+    assert creates[0]["budget"]["max_list_cost"]["amount"] == "250" and "budget" not in creates[1]
+    assert c.get("/api/health").json()["spend_cap"] == "off"
+
+
+@pytest.mark.parametrize("refusal", [TypeError("create() got an unexpected keyword argument 'budget'"),
+                                     type("BadRequest", (Exception,), {"status_code": 400})("budget is not available")])
+def test_a_refused_cap_does_not_stop_the_team(managed, refusal):
+    """An older library, or a service that will not take a cap: the teammate still answers, and health says so."""
+    c, b, calls = managed
+    plain = b.client.beta.sessions.create
+
+    def create(**kw):
+        if "budget" in kw:
+            calls.append(("refused", kw))
+            raise refusal
+        return plain(**kw)
+
+    b.client.beta.sessions.create = create
+    h = {"x-crew-key": "secret"}
+    assert c.post("/api/sample", json={"prompt": "You are Mia, x"}, headers=h).status_code == 200
+    assert c.post("/api/sample", json={"prompt": "You are Leo, x"}, headers=h).status_code == 200
+    assert len([x for x in calls if x[0] == "refused"]) == 1      # asked once, then stopped asking
+    assert c.get("/api/health").json()["spend_cap"] == "refused"
+
+
+def test_other_create_failures_are_not_mistaken_for_a_refused_cap(managed):
+    c, b, calls = managed
+
+    def create(**kw):
+        calls.append(("create", kw))
+        raise type("Forbidden", (Exception,), {"status_code": 403})("no access to this agent")
+
+    b.client.beta.sessions.create = create
+    r = c.post("/api/sample", json={"prompt": "You are Mia, x"}, headers={"x-crew-key": "secret"})
+    assert r.status_code == 502 and b.cap_refused is False
+
+
+@pytest.mark.parametrize("stop_reason", ["budget_reached", NS(type="budget_reached")])
+def test_reaching_the_cap_stops_the_work_and_is_recorded(managed, stop_reason):
+    c, b, calls = managed
+    b.client.beta.sessions.events.stream = lambda session_id: FakeStream([
+        NS(type="session.status_running"),
+        NS(type="agent.message", content=[NS(type="text", text="half an answer")]),
+        NS(type="session.usage"),
+        NS(type="session.status_idle", stop_reason=stop_reason),
+    ])
+    h = {"x-crew-key": "secret"}
+    r = c.post("/api/sample", json={"prompt": "You are Jimmy, build it"}, headers=h)
+    assert r.status_code == 502 and r.json()["error"] == "budget"
+    assert len([x for x in calls if x[0] == "create"]) == 1       # not retried by itself: that would spend a second cap
+    assert "jimmy" not in b.state["sessions"]                      # the paused conversation is not reused
+    entry = c.get("/api/activity", headers=h).json()["entries"][0]
+    assert entry["ok"] is False and "spending cap" in entry["text"]
+
+
+def test_an_ordinary_finish_is_not_mistaken_for_the_cap(managed):
+    c, b, calls = managed
+    b.client.beta.sessions.events.stream = lambda session_id: FakeStream([
+        NS(type="agent.message", content=[NS(type="text", text='{"says": "Done."}')]),
+        NS(type="session.status_idle", stop_reason=NS(type="end_turn")),
+    ])
+    r = c.post("/api/sample", json={"prompt": "You are Mia, x", "json_mode": True}, headers={"x-crew-key": "secret"})
+    assert r.status_code == 200 and r.json()["json"] == {"says": "Done."}
+
+
+def test_conversations_are_kept_short_by_default():
+    assert crew.SESSION_MAX_USES == 5
+
+
+def test_the_team_runs_mostly_on_the_small_model():
+    """Seven teammates on the small model; only the two heavy thinkers on the larger one."""
+    import re
+    agents = Path(__file__).resolve().parent.parent / "agents"
+    big = sorted(k for k in crew.TEAM if "claude-sonnet-5-5" in re.split(r"^---\s*$", (agents / (k + ".md")).read_text(encoding="utf8"), flags=re.M)[1])
+    small = sorted(k for k in crew.TEAM if "claude-haiku-5-5" in re.split(r"^---\s*$", (agents / (k + ".md")).read_text(encoding="utf8"), flags=re.M)[1])
+    assert big == ["jimmy", "mia"] and len(small) == 7 and "michael" in small

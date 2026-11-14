@@ -1,6 +1,8 @@
 ---
 name: Jimmy (Backend)
-model: claude-sonnet-5-5
+model:
+  id: claude-sonnet-5-5
+  effort: medium
 tools:
   - type: agent_toolset_20260401
     configs:

@@ -143,13 +143,17 @@ The **Teach** button (and "Teach Jimmy: when I ask for a truck report, start wit
 ## How it works
 
 - The screen sends each teammate's prompt to `/api/sample`. The server finds which teammate it is for, sends it to that teammate's session, waits until they finish, and returns their answer.
-- Each teammate keeps one long conversation, so they remember earlier turns. After `SESSION_MAX_USES` requests (10) the server starts a fresh conversation with them, so the history does not grow forever. The screen's notes are sent along each time, so nothing you told them is lost.
+- Each teammate keeps one conversation, so they remember earlier turns. After `SESSION_MAX_USES` requests (5) the server starts a fresh conversation with them, so the history does not grow and cost more with every answer. The screen sends its notes and the last ten lines of the conversation along each time, so nothing you told them is lost.
 - Voices and the microphone come from the browser, so there is nothing else to connect. Michael, Leo, Jimmy and Jason get male voices, and Mia, Raphaella, Sara, Freya and Martina get female voices, if the device has them. Freya and Martina each have their own slot among the female voices and a slightly different pitch, so they sound like their own people. Which voices exist depends on the phone.
 - The teammates may use their sandbox when you ask them to build, run or test something. For everyday conversation they just answer.
 
 ## Costs and safety
 
 - You pay normal token rates plus $0.08 per session-hour of active running time. Calls are short, but watch usage in the Console during the first days.
+- **Built to be cheap.** Seven teammates (Michael, Leo, Raphaella, Jason, Sara, Freya and Martina) run on the small Haiku model, which costs about a twentieth of Sonnet. Only Mia and Jimmy, who do the deep design and the server code, run on Sonnet, at medium effort. The agent service caches each teammate's instructions and earlier turns by itself, so repeated text is billed at a fraction of the price; there is nothing to switch on.
+- **One request can never fan out.** Michael brings in at most two teammates, a handoff is only a note on the screen (it does not start another teammate by itself), and Michael wraps up once: at most four answers per request, unless you call more teammates by name yourself. Answers are held to a few sentences by their instructions.
+- **A hard cap per conversation.** `SESSION_BUDGET_CENTS` (100, so $1.00) is the most one teammate's conversation may spend. The agent service enforces it: at the cap the teammate stops, the record says so, and your next request starts a fresh conversation. Set it to 0 for no cap. `/api/health` shows `spend_cap`; if it says `refused`, the service would not take a cap and the team is running without one.
+- Also set a monthly spending limit in the Claude Console. That is the only limit that covers everything.
 - `MAX_REQUESTS_PER_MIN` (40) stops runaway use. Lower it if you like.
 - Anyone who has your server address and passcode spends your money. Use a long passcode, and do not share the address.
 - The sandbox starts with limited network access (package managers only). Read what the teammates write before you run or ship it. Sessions stay until you delete them in the Console.
@@ -157,7 +161,7 @@ The **Teach** button (and "Teach Jimmy: when I ask for a truck report, start wit
 
 ## Changing things
 
-- **A teammate's model or instructions:** edit `agents/<name>.md`, then run `./scripts/apply.sh` again.
+- **A teammate's model or instructions:** edit `agents/<name>.md`, then run `./scripts/apply.sh` again (or the Publish teammates job on GitHub). To give a teammate the larger model, replace its `model: claude-haiku-5-5` line with the three `model:` lines from `agents/mia.md`.
 - **Let them search the web:** in the agent files, change `enabled: false` to `true` for `web_search` and `web_fetch`.
 - **Working on one codebase:** each session has its own sandbox, so teammates do not share files. Either give them a shared git repository (this needs the environment's network settings to allow your git host; see the Managed Agents environment docs), or use the multi-agent feature, which is a research preview that must be requested.
 - **A newer version of the screen:** save the page's HTML and run `python scripts/make_index.py voice-crew.html server/public/index.html`.
